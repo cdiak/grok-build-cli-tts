@@ -84,6 +84,14 @@ paths = ["~/grok-build-cli-tts/.grok/skills/tts"]
 /tts ./my-project
 ```
 
+### Fast playback (avoid 30–90s “dead air”)
+
+1. **Keep the server warm:** `kokoro-server` once per session (or rely on `KOKORO_KEEP_SERVER=1`, the default).
+2. **Cold start is ~20–40s** while the ONNX model loads — stderr shows `Server loading model…` with elapsed seconds.
+3. **New `/tts` replaces in-flight playback** — stale `kokoro-speak` clients are killed and the server queue is cleared automatically.
+4. **Do not background `kokoro-speak` from agents** — cancelled turns used to orphan long playbacks and block the queue for minutes (fixed in current `lib/cli/speak.mjs` + `lib/server/speak-queue.mjs`).
+5. **Gapless sentence batches** — the client now reads NDJSON chunks in parallel with playback and concatenates every buffered sentence into one `afplay` call, removing the old per-sentence two-second stall.
+
 ---
 
 ## Environment variables

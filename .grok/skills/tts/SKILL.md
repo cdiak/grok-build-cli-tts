@@ -186,14 +186,25 @@ Env: `KOKORO_SERVER_DIR` (default `lib/server` in repo), `KOKORO_PORT`, `KOKORO_
 
 1. Write the full TTS markdown reply in the chat (as today).
 2. Save the **same body** to a temp file, e.g. `/tmp/grok-tts-<timestamp>.md` (include everything through `<!-- tts:end -->`; the player strips headers and that comment).
-3. Run kokoro-speak in the shell with a long `block_until_ms` (first run may download the model; long REPO scripts take several minutes):
+3. **Pre-warm** (fast path when server already loaded): if `curl -sf http://127.0.0.1:${KOKORO_PORT:-19200}/status` shows `"ready":true`, skip to step 4. Otherwise run `kokoro-server` once and wait for Ready (cold model load is ~20–40s; first-ever download can take 1–3 min).
+4. Run kokoro-speak in the **foreground** with a long `block_until_ms` (long REPO scripts take several minutes to play). Do **not** background kokoro-speak — cancelled agent turns leave orphan clients that used to block the speak queue for minutes.
 
    ```bash
    kokoro-speak /tmp/grok-tts-<timestamp>.md
    ```
 
-4. If synthesis fails, append **one short line** after the script: `Playback failed: <reason>. Use no-play or check Kokoro server.` Do not replace the script.
-5. Do **not** narrate the shell command in the spoken markdown; keep playback out of band.
+   New invocations auto-cancel stale `kokoro-speak` clients and replace any in-flight server queue (`KOKORO_REPLACE_QUEUE=1` default). stderr shows progress: server warm/loading, first audio chunk timing.
+
+5. If synthesis fails, append **one short line** after the script: `Playback failed: <reason>. Use no-play or check Kokoro server.` Do not replace the script.
+6. Do **not** narrate the shell command in the spoken markdown; keep playback out of band.
+
+### Slow start troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| 20–40s before first audio, stderr says "Starting server" / "model loading" | Cold server — ONNX model not in memory | Run `kokoro-server` at session start, or leave `KOKORO_KEEP_SERVER=1` (default) |
+| 30–90s with no "First audio chunk" line | Prior `/tts` still playing or orphaned client held the queue | Fixed in current kokoro-speak (auto-kill stale clients + `replace` queue). Restart server if on old code: `pkill -f 'lib/server/index.mjs'; kokoro-server` |
+| Instant stderr but long wait on 10k+ char scripts | Normal — first chunk synthesis after long text split | Watch for `First audio chunk in Xs` |
 
 ### Flags the user can pass via `/tts`
 
